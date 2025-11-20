@@ -160,32 +160,32 @@ Our TensorRT changes deliver:
 
 ### GPU Acceleration & Performance
 
-  - Custom TensorRT Wrapper (tensorrt_runner.py) - Replaces ONNX Runtime's basic TensorRT support with custom engine compilation featuring CuPy zero-copy GPU binding, dynamic power-of-2 batch optimization (up to 64 faces), and SHA1-versioned engine caching that eliminates warmup on subsequent runs
+  - **Custom TensorRT Wrapper (tensorrt_runner.py)** - Replaces ONNX Runtime's basic TensorRT support with custom engine compilation featuring CuPy zero-copy GPU binding, dynamic power-of-2 batch optimization (up to 64 faces), and SHA1-versioned engine caching that eliminates warmup on subsequent runs
 
-  - CuPy Zero-Copy Pipeline Integration - Extensive face_swapper.py modifications eliminate around 50 CPU to GPU transfers per frame by maintaining tensors in GPU memory with cp.asarray direct binding, executing all preprocessing operations (transpose NHWC -> NCHW normalization, clamping) on GPU without NumPy conversion overhead
+  - **CuPy Zero-Copy Pipeline Integration** - Extensive face_swapper.py modifications eliminate around 50 CPU to GPU transfers per frame by maintaining tensors in GPU memory with cp.asarray direct binding, executing all preprocessing operations (transpose NHWC -> NCHW normalization, clamping) on GPU without NumPy conversion overhead
 
-  - Custom CUDA Kernels (gpu/kernels.py) - Runtime-compiled Catmull-Rom bicubic interpolation kernels with CUDA texture objects   (cudaTextureObject_t) deliver faster warping than PyTorch grid_sample while eliminating aliasing through 4x4 sample neighborhoods, processed in 16x16 thread blocks 
+  - **Custom CUDA Kernels (gpu/kernels.py)** - Runtime-compiled Catmull-Rom bicubic interpolation kernels with CUDA texture objects   (cudaTextureObject_t) deliver faster warping than PyTorch grid_sample while eliminating aliasing through 4x4 sample neighborhoods, processed in 16x16 thread blocks 
 
-  - Hardware Video Pipeline (gpu_video_pipeline.py) - Full NVDEC/NVENC pipeline using torchaudio's hardware decode/encode APIs (NOT ffmpe CLI) with multi-stream architecture (separate CUDA streams for decode/compute/encode), faster video I/O through overlapped execution, pinned buffers, and non-blocking transfers with ThreadPoolExecutor pipelining
+  - **Hardware Video Pipeline (gpu_video_pipeline.py)** - Full NVDEC/NVENC pipeline using torchaudio's hardware decode/encode APIs (NOT ffmpe CLI) with multi-stream architecture (separate CUDA streams for decode/compute/encode), faster video I/O through overlapped execution, pinned buffers, and non-blocking transfers with ThreadPoolExecutor pipelining
 
-  - CV-CUDA Preprocessing (gpu/preprocess.py) - GPU-native affine warping via cvcuda.warpaffine and NV12 color conversion via cvcuda.cvtcolor bypass CPU entirely when available, with automatic PyTorch grid_sample fallback for compatibility
+  - **CV-CUDA Preprocessing (gpu/preprocess.py)** - GPU-native affine warping via cvcuda.warpaffine and NV12 color conversion via cvcuda.cvtcolor bypass CPU entirely when available, with automatic PyTorch grid_sample fallback for compatibility
 
-  - Optimized Inference Sessions - Adds SessionOptions configuration with ORT_ENABLE_ALL graph optimization, memory pattern caching, PyTorch CUDA stream binding via cuda_stream provider option for proper synchronization, and automatic serial (GPU) vs parallel (CPU) execution mode selection to avoid thread contention.
+  - **Optimized Inference Sessions** - Adds SessionOptions configuration with ORT_ENABLE_ALL graph optimization, memory pattern caching, PyTorch CUDA stream binding via cuda_stream provider option for proper synchronization, and automatic serial (GPU) vs parallel (CPU) execution mode selection to avoid thread contention.
 
 ### Quality & Temporal Stability
 
-  - GPU ROI Compositor (gpu/compositor.py) - 3-level Laplacian pyramid blending in perceptually-correct linear RGB space with sRGB↔Linear conversions, separable Gaussian blur, and spatial dithering eliminates seams, color halos, and banding artifacts that base paste_back operations exhibit, maintaining 8-bit quality without visible posterization.
+  - **GPU ROI Compositor (gpu/compositor.py)** - 3-level Laplacian pyramid blending in perceptually-correct linear RGB space with sRGB↔Linear conversions, separable Gaussian blur, and spatial dithering eliminates seams, color halos, and banding artifacts that base paste_back operations exhibit, maintaining 8-bit quality without visible posterization.
 
-  - Hardware Optical Flow Stabilization - NVIDIA OFA (NvidiaOpticalFlow_2_0) warps previous frames forward and blends with 70% weight when similarity >0.85, reducing flicker through confidence-gated fusion (tau=0.35) 
+  - **Hardware Optical Flow Stabilization** - NVIDIA OFA (NvidiaOpticalFlow_2_0) warps previous frames forward and blends with 70% weight when similarity >0.85, reducing flicker through confidence-gated fusion (tau=0.35) 
 
-  - Adaptive Anomaly Detection - Tracks quality metrics across 10-frame windows using approximate SSIM; when drops exceed 15% below median, applies 90% previous-frame blending to prevent catastrophic dips while maintaining sharpness during normal operation, addressing quality instability in challenging poses.
+  - **Adaptive Anomaly Detection** - Tracks quality metrics across 10-frame windows using approximate SSIM; when drops exceed 15% below median, applies 90% previous-frame blending to prevent catastrophic dips while maintaining sharpness during normal operation, addressing quality instability in challenging poses.
 
-  - Temporal Snap & Seam Reuse - Eliminates micro-jitter by blending 70% toward previous when SSIM >0.95, and caches 12-pixel seam bands for reuse when face motion <3 pixels, completely removing edge flicker artifacts without per-frame blending cost that base's static composition exhibits.
+  - **Temporal Snap & Seam Reuse** - Eliminates micro-jitter by blending 70% toward previous when SSIM >0.95, and caches 12-pixel seam bands for reuse when face motion <3 pixels, completely removing edge flicker artifacts without per-frame blending cost that base's static composition exhibits.
 
-  - Face Tracking (face_tracker.py) - Lucas-Kanade pyramidal optical flow propagates 68 landmarks across frames with One-Euro filtering, reducing expensive detector calls by 5x (every 6 frames vs every frame) while maintaining responsiveness through IoU-based trac matching and confidence gating that skips low-quality detections.
+  - **Face Tracking (face_tracker.py)** - Lucas-Kanade pyramidal optical flow propagates 68 landmarks across frames with One-Euro filtering, reducing expensive detector calls by 5x (every 6 frames vs every frame) while maintaining responsiveness through IoU-based trac matching and confidence gating that skips low-quality detections.
 
-  - Similarity-Transform Smoothing (temporal_filters.py) - Decomposes affines into SE(2) components and applies 2nd-order polynomial fitting over 9-frame windows with bounded derivatives (max 3°/frame rotation, 6px translation, 2% scale change), providing physically-plausible smooth transformations that eliminate jitter 
+  - **Similarity-Transform Smoothing (temporal_filters.py)** - Decomposes affines into SE(2) components and applies 2nd-order polynomial fitting over 9-frame windows with bounded derivatives (max 3°/frame rotation, 6px translation, 2% scale change), providing physically-plausible smooth transformations that eliminate jitter 
 
-  - Quantized Color Transfer - Linear-space gain/bias correction with 1/256 quantization and momentum-based smoothing (0.1 alpha) prevent frame-to-frame color pumping artifacts while maintaining stable appearance, addressing color inconsistency issues in base's direct RGB operations without temporal coherence.
+  - **Quantized Color Transfer** - Linear-space gain/bias correction with 1/256 quantization and momentum-based smoothing (0.1 alpha) prevent frame-to-frame color pumping artifacts while maintaining stable appearance, addressing color inconsistency issues in base's direct RGB operations without temporal coherence.
 
-  - Performance Profiling (profiler.py) - Thread-safe metrics collection tracks per-stage timing (detector, landmarker, recognizer, swapper) with atomic accumulation and snapshot-reset API for bottleneck identification during optimization, providing visibility 
+  - **Performance Profiling (profiler.py)** - Thread-safe metrics collection tracks per-stage timing (detector, landmarker, recognizer, swapper) with atomic accumulation and snapshot-reset API for bottleneck identification during optimization, providing visibility 
