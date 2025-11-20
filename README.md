@@ -8,12 +8,6 @@ FaceFusion
 ![License](https://img.shields.io/badge/license-OpenRAIL--AS-green)
 
 
-Preview
--------
-
-![Preview](https://raw.githubusercontent.com/facefusion/facefusion/master/.github/preview.png?sanitize=true)
-
-
 Installation
 ------------
 
@@ -59,3 +53,35 @@ Documentation
 -------------
 
 Read the [documentation](https://docs.facefusion.io) for a deep dive.
+
+
+Optimizations 
+-------------
+
+## Performance & GPU Acceleration
+
+- Added GPU video pipeline with **NVDEC hardware decoding** and **NVENC hardware encoding**
+- Implemented **TensorRT runner** for accelerated model inference
+- Added **CUDA-based GPU compositor** with custom blending kernels
+- Introduced GPU-accelerated preprocessing modules for frame operations
+- Enabled **end-to-end GPU processing**, keeping frames entirely in CUDA memory
+
+
+## Face Processing Enhancements
+
+- Added a lightweight **face tracker** to reduce repeated per-frame detections
+- Implemented **OneEuroFilter** for temporal landmark smoothing
+- Added **temporal filtering modules** to improve video consistency and reduce jitter
+- Enhanced face swapper with **TensorRT acceleration** and smarter batch scheduling
+- Improved face detector with adaptive **dynamic strategy heuristics**
+
+
+## Architecture Improvements
+
+- Consolidated processor modules into unified single-file implementations:  
+  `age_modifier`, `deep_swapper`, `expression_restorer`,  
+  `face_debugger`, `face_editor`, `face_enhancer`, `face_swapper`,  
+  `frame_colorizer`, `frame_enhancer`, `lip_syncer`
+- Replaced the previous translator/locals/sanitizer modules with a unified **wording module**
+- Refactored `core.py` with **650+ new additions** improving the processing pipeline
+- Added a new **profiler module** for real-time performance monitoring and debugging
