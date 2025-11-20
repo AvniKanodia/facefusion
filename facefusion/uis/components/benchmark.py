@@ -1,8 +1,8 @@
-from typing import Any, Iterator, List, Optional
+from typing import Any, Generator, List, Optional
 
 import gradio
 
-from facefusion import benchmarker, state_manager, translator
+from facefusion import benchmarker, state_manager, wording
 
 BENCHMARK_BENCHMARKS_DATAFRAME : Optional[gradio.Dataframe] = None
 BENCHMARK_START_BUTTON : Optional[gradio.Button] = None
@@ -34,7 +34,7 @@ def render() -> None:
 		show_label = False
 	)
 	BENCHMARK_START_BUTTON = gradio.Button(
-		value = translator.get('uis.start_button'),
+		value = wording.get('uis.start_button'),
 		variant = 'primary',
 		size = 'sm'
 	)
@@ -44,7 +44,7 @@ def listen() -> None:
 	BENCHMARK_START_BUTTON.click(start, outputs = BENCHMARK_BENCHMARKS_DATAFRAME)
 
 
-def start() -> Iterator[List[Any]]:
+def start() -> Generator[List[Any], None, None]:
 	state_manager.sync_state()
 
 	for benchmark in benchmarker.run():

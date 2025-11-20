@@ -28,7 +28,7 @@ def get_available_execution_providers() -> List[ExecutionProvider]:
 	return available_execution_providers
 
 
-def create_inference_session_providers(execution_device_id : int, execution_providers : List[ExecutionProvider]) -> List[InferenceSessionProvider]:
+def create_inference_session_providers(execution_device_id : str, execution_providers : List[ExecutionProvider]) -> List[InferenceSessionProvider]:
 	inference_session_providers : List[InferenceSessionProvider] = []
 
 	for execution_provider in execution_providers:
@@ -46,7 +46,8 @@ def create_inference_session_providers(execution_device_id : int, execution_prov
 				'trt_engine_cache_path': '.caches',
 				'trt_timing_cache_enable': True,
 				'trt_timing_cache_path': '.caches',
-				'trt_builder_optimization_level': 5
+				'trt_builder_optimization_level': 5,
+				'trt_fp16_enable': True
 			}))
 		if execution_provider in [ 'directml', 'rocm' ]:
 			inference_session_providers.append((facefusion.choices.execution_provider_set.get(execution_provider),
@@ -89,10 +90,10 @@ def resolve_cudnn_conv_algo_search() -> str:
 	return 'EXHAUSTIVE'
 
 
-def resolve_openvino_device_type(execution_device_id : int) -> str:
-	if execution_device_id == 0:
+def resolve_openvino_device_type(execution_device_id : str) -> str:
+	if execution_device_id == '0':
 		return 'GPU'
-	return 'GPU.' + str(execution_device_id)
+	return 'GPU.' + execution_device_id
 
 
 def run_nvidia_smi() -> subprocess.Popen[bytes]:

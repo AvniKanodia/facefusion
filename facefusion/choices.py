@@ -68,9 +68,7 @@ video_type_set : VideoTypeSet =\
 	'm4v': 'video/mp4',
 	'mkv': 'video/x-matroska',
 	'mp4': 'video/mp4',
-	'mpeg': 'video/mpeg',
 	'mov': 'video/quicktime',
-	'mxf': 'application/mxf',
 	'webm': 'video/webm',
 	'wmv': 'video/x-ms-wmv'
 }
@@ -153,7 +151,6 @@ job_statuses : List[JobStatus] = [ 'drafted', 'queued', 'completed', 'failed' ]
 benchmark_cycle_count_range : Sequence[int] = create_int_range(1, 10, 1)
 execution_thread_count_range : Sequence[int] = create_int_range(1, 32, 1)
 system_memory_limit_range : Sequence[int] = create_int_range(0, 128, 4)
-face_detector_margin_range : Sequence[int] = create_int_range(0, 100, 1)
 face_detector_angles : Sequence[Angle] = create_int_range(0, 270, 90)
 face_detector_score_range : Sequence[Score] = create_float_range(0.0, 1.0, 0.05)
 face_landmarker_score_range : Sequence[Score] = create_float_range(0.0, 1.0, 0.05)
@@ -167,3 +164,7 @@ output_audio_quality_range : Sequence[int] = create_int_range(0, 100, 1)
 output_audio_volume_range : Sequence[int] = create_int_range(0, 100, 1)
 output_video_quality_range : Sequence[int] = create_int_range(0, 100, 1)
 output_video_scale_range : Sequence[float] = create_float_range(0.25, 8.0, 0.25)
+face_tracker_detection_interval_range : Sequence[int] = create_int_range(1, 30, 1)
+face_tracker_max_missed_range : Sequence[int] = create_int_range(0, 10, 1)
+face_tracker_min_points_range : Sequence[int] = create_int_range(5, 68, 1)
+face_tracker_match_iou_range : Sequence[float] = create_float_range(0.1, 0.9, 0.05)

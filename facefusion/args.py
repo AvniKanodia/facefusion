@@ -1,7 +1,7 @@
 from facefusion import state_manager
 from facefusion.filesystem import get_file_name, is_video, resolve_file_paths
 from facefusion.jobs import job_store
-from facefusion.normalizer import normalize_fps, normalize_space
+from facefusion.normalizer import normalize_fps, normalize_padding
 from facefusion.processors.core import get_processors_modules
 from facefusion.types import ApplyStateItem, Args
 from facefusion.vision import detect_video_fps
@@ -55,9 +55,14 @@ def apply_args(args : Args, apply_state_item : ApplyStateItem) -> None:
 	# face detector
 	apply_state_item('face_detector_model', args.get('face_detector_model'))
 	apply_state_item('face_detector_size', args.get('face_detector_size'))
-	apply_state_item('face_detector_margin', normalize_space(args.get('face_detector_margin')))
 	apply_state_item('face_detector_angles', args.get('face_detector_angles'))
 	apply_state_item('face_detector_score', args.get('face_detector_score'))
+	# face tracker
+	apply_state_item('enable_face_tracking', args.get('enable_face_tracking'))
+	apply_state_item('face_tracker_detection_interval', args.get('face_tracker_detection_interval'))
+	apply_state_item('face_tracker_max_missed', args.get('face_tracker_max_missed'))
+	apply_state_item('face_tracker_min_points', args.get('face_tracker_min_points'))
+	apply_state_item('face_tracker_match_iou', args.get('face_tracker_match_iou'))
 	# face landmarker
 	apply_state_item('face_landmarker_model', args.get('face_landmarker_model'))
 	apply_state_item('face_landmarker_score', args.get('face_landmarker_score'))
@@ -78,7 +83,7 @@ def apply_args(args : Args, apply_state_item : ApplyStateItem) -> None:
 	apply_state_item('face_mask_areas', args.get('face_mask_areas'))
 	apply_state_item('face_mask_regions', args.get('face_mask_regions'))
 	apply_state_item('face_mask_blur', args.get('face_mask_blur'))
-	apply_state_item('face_mask_padding', normalize_space(args.get('face_mask_padding')))
+	apply_state_item('face_mask_padding', normalize_padding(args.get('face_mask_padding')))
 	# voice extractor
 	apply_state_item('voice_extractor_model', args.get('voice_extractor_model'))
 	# frame extraction
@@ -112,6 +117,7 @@ def apply_args(args : Args, apply_state_item : ApplyStateItem) -> None:
 	apply_state_item('execution_device_ids', args.get('execution_device_ids'))
 	apply_state_item('execution_providers', args.get('execution_providers'))
 	apply_state_item('execution_thread_count', args.get('execution_thread_count'))
+	apply_state_item('enable_streaming_pipeline', args.get('enable_streaming_pipeline'))
 	# download
 	apply_state_item('download_providers', args.get('download_providers'))
 	apply_state_item('download_scope', args.get('download_scope'))

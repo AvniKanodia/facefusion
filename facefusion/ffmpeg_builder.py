@@ -1,69 +1,54 @@
 import itertools
 import shutil
-from typing import List, Optional
+from typing import Optional
 
 import numpy
 
 from facefusion.filesystem import get_file_format
-from facefusion.types import AudioEncoder, Command, CommandSet, Duration, Fps, StreamMode, VideoEncoder, VideoPreset
+from facefusion.types import AudioEncoder, Commands, Duration, Fps, StreamMode, VideoEncoder, VideoPreset
 
 
-def run(commands : List[Command]) -> List[Command]:
+def run(commands : Commands) -> Commands:
 	return [ shutil.which('ffmpeg'), '-loglevel', 'error' ] + commands
 
 
-def chain(*commands : List[Command]) -> List[Command]:
+def chain(*commands : Commands) -> Commands:
 	return list(itertools.chain(*commands))
 
 
-def concat(*__commands__ : List[Command]) -> List[Command]:
-	commands = []
-	command_set : CommandSet = {}
-
-	for command in __commands__:
-		for argument, value in zip(command[::2], command[1::2]):
-			command_set.setdefault(argument, []).append(value)
-
-	for argument, values in command_set.items():
-		commands.append(argument)
-		commands.append(','.join(values))
-
-	return commands
-
-
-def get_encoders() -> List[Command]:
+def get_encoders() -> Commands:
 	return [ '-encoders' ]
 
 
-def set_hardware_accelerator(value : str) -> List[Command]:
+def set_hardware_accelerator(value : str) -> Commands:
 	return [ '-hwaccel', value ]
 
 
-def set_progress() -> List[Command]:
+def set_progress() -> Commands:
 	return [ '-progress' ]
 
 
-def set_input(input_path : str) -> List[Command]:
+def set_input(input_path : str) -> Commands:
 	return [ '-i', input_path ]
 
 
-def set_input_fps(input_fps : Fps) -> List[Command]:
+def set_input_fps(input_fps : Fps) -> Commands:
 	return [ '-r', str(input_fps)]
 
 
-def set_output(output_path : str) -> List[Command]:
+def set_output(output_path : str) -> Commands:
 	return [ output_path ]
 
 
-def force_output(output_path : str) -> List[Command]:
+def force_output(output_path : str) -> Commands:
 	return [ '-y', output_path ]
 
 
-def cast_stream() -> List[Command]:
+def cast_stream() -> Commands:
 	return [ '-' ]
 
 
-def set_stream_mode(stream_mode : StreamMode) -> List[Command]:
+def set_stream_mode(stream_mode : StreamMode) -> Commands:
 	if stream_mode == 'udp':
 		return [ '-f', 'mpegts' ]
 	if stream_mode == 'v4l2':
@@ -71,27 +56,25 @@ def set_stream_mode(stream_mode : StreamMode) -> List[Command]:
 	return []
 
 
-def set_stream_quality(stream_quality : int) -> List[Command]:
+def set_stream_quality(stream_quality : int) -> Commands:
 	return [ '-b:v', str(stream_quality) + 'k' ]
 
 
-def unsafe_concat() -> List[Command]:
+def unsafe_concat() -> Commands:
 	return [ '-f', 'concat', '-safe', '0' ]
 
 
-def set_pixel_format(video_encoder : VideoEncoder) -> List[Command]:
+def set_pixel_format(video_encoder : VideoEncoder) -> Commands:
 	if video_encoder == 'rawvideo':
 		return [ '-pix_fmt', 'rgb24' ]
-	if video_encoder == 'libvpx-vp9':
-		return [ '-pix_fmt', 'yuva420p' ]
 	return [ '-pix_fmt', 'yuv420p' ]
 
 
-def set_frame_quality(frame_quality : int) -> List[Command]:
+def set_frame_quality(frame_quality : int) -> Commands:
 	return [ '-q:v', str(frame_quality) ]
 
 
-def select_frame_range(frame_start : int, frame_end : int, video_fps : Fps) -> List[Command]:
+def select_frame_range(frame_start : int, frame_end : int, video_fps : Fps) -> Commands:
 	if isinstance(frame_start, int) and isinstance(frame_end, int):
 		return [ '-vf', 'trim=start_frame=' + str(frame_start) + ':end_frame=' + str(frame_end) + ',fps=' + str(video_fps) ]
 	if isinstance(frame_start, int):
@@ -101,11 +84,11 @@ def select_frame_range(frame_start : int, frame_end : int, video_fps : Fps) -> L
 	return [ '-vf', 'fps=' + str(video_fps) ]
 
 
-def prevent_frame_drop() -> List[Command]:
+def prevent_frame_drop() -> Commands:
 	return [ '-vsync', '0' ]
 
 
-def select_media_range(frame_start : int, frame_end : int, media_fps : Fps) -> List[Command]:
+def select_media_range(frame_start : int, frame_end : int, media_fps : Fps) -> Commands:
 	commands = []
 
 	if isinstance(frame_start, int):
@@ -115,15 +98,15 @@ def select_media_range(frame_start : int, frame_end : int, media_fps : Fps) -> L
 	return commands
 
 
-def select_media_stream(media_stream : str) -> List[Command]:
+def select_media_stream(media_stream : str) -> Commands:
 	return [ '-map', media_stream ]
 
 
-def set_media_resolution(video_resolution : str) -> List[Command]:
+def set_media_resolution(video_resolution : str) -> Commands:
 	return [ '-s', video_resolution ]
 
 
-def set_image_quality(image_path : str, image_quality : int) -> List[Command]:
+def set_image_quality(image_path : str, image_quality : int) -> Commands:
 	if get_file_format(image_path) == 'webp':
 		return [ '-q:v', str(image_quality) ]
 
@@ -131,19 +114,19 @@ def set_image_quality(image_path : str, image_quality : int) -> List[Command]:
 	return [ '-q:v', str(image_compression) ]
 
 
-def set_audio_encoder(audio_codec : str) -> List[Command]:
+def set_audio_encoder(audio_codec : str) -> Commands:
 	return [ '-c:a', audio_codec ]
 
 
-def copy_audio_encoder() -> List[Command]:
+def copy_audio_encoder() -> Commands:
 	return set_audio_encoder('copy')
 
 
-def set_audio_sample_rate(audio_sample_rate : int) -> List[Command]:
+def set_audio_sample_rate(audio_sample_rate : int) -> Commands:
 	return [ '-ar', str(audio_sample_rate) ]
 
 
-def set_audio_sample_size(audio_sample_size : int) -> List[Command]:
+def set_audio_sample_size(audio_sample_size : int) -> Commands:
 	if audio_sample_size == 16:
 		return [ '-f', 's16le' ]
 	if audio_sample_size == 32:
@@ -151,11 +134,11 @@ def set_audio_sample_size(audio_sample_size : int) -> List[Command]:
 	return []
 
 
-def set_audio_channel_total(audio_channel_total : int) -> List[Command]:
+def set_audio_channel_total(audio_channel_total : int) -> Commands:
 	return [ '-ac', str(audio_channel_total) ]
 
 
-def set_audio_quality(audio_encoder : AudioEncoder, audio_quality : int) -> List[Command]:
+def set_audio_quality(audio_encoder : AudioEncoder, audio_quality : int) -> Commands:
 	if audio_encoder == 'aac':
 		audio_compression = numpy.round(numpy.interp(audio_quality, [ 0, 100 ], [ 0.1, 2.0 ]), 1).astype(float).item()
 		return [ '-q:a', str(audio_compression) ]
@@ -171,19 +154,19 @@ def set_audio_quality(audio_encoder : AudioEncoder, audio_quality : int) -> List
 	return []
 
 
-def set_audio_volume(audio_volume : int) -> List[Command]:
+def set_audio_volume(audio_volume : int) -> Commands:
 	return [ '-filter:a', 'volume=' + str(audio_volume / 100) ]
 
 
-def set_video_encoder(video_encoder : str) -> List[Command]:
+def set_video_encoder(video_encoder : str) -> Commands:
 	return [ '-c:v', video_encoder ]
 
 
-def copy_video_encoder() -> List[Command]:
+def copy_video_encoder() -> Commands:
 	return set_video_encoder('copy')
 
 
-def set_video_quality(video_encoder : VideoEncoder, video_quality : int) -> List[Command]:
+def set_video_quality(video_encoder : VideoEncoder, video_quality : int) -> Commands:
 	if video_encoder in [ 'libx264', 'libx264rgb', 'libx265' ]:
 		video_compression = numpy.round(numpy.interp(video_quality, [ 0, 100 ], [ 51, 0 ])).astype(int).item()
 		return [ '-crf', str(video_compression) ]
@@ -205,7 +188,7 @@ def set_video_quality(video_encoder : VideoEncoder, video_quality : int) -> List
 	return []
 
 
-def set_video_preset(video_encoder : VideoEncoder, video_preset : VideoPreset) -> List[Command]:
+def set_video_preset(video_encoder : VideoEncoder, video_preset : VideoPreset) -> Commands:
 	if video_encoder in [ 'libx264', 'libx264rgb', 'libx265' ]:
 		return [ '-preset', video_preset ]
 	if video_encoder in [ 'h264_nvenc', 'hevc_nvenc' ]:
@@ -217,25 +200,19 @@ def set_video_preset(video_encoder : VideoEncoder, video_preset : VideoPreset) -
 	return []
 
 
-def set_video_fps(video_fps : Fps) -> List[Command]:
-	return [ '-vf', 'fps=' + str(video_fps) ]
+def set_video_fps(video_fps : Fps) -> Commands:
+	return [ '-vf', 'framerate=fps=' + str(video_fps) ]
 
 
-def set_video_duration(video_duration : Duration) -> List[Command]:
+def set_video_duration(video_duration : Duration) -> Commands:
 	return [ '-t', str(video_duration) ]
 
 
-def keep_video_alpha(video_encoder : VideoEncoder) -> List[Command]:
-	if video_encoder == 'libvpx-vp9':
-		return [ '-vf', 'format=yuva420p' ]
-	return []
-
-
-def capture_video() -> List[Command]:
+def capture_video() -> Commands:
 	return [ '-f', 'rawvideo', '-pix_fmt', 'rgb24' ]
 
 
-def ignore_video_stream() -> List[Command]:
+def ignore_video_stream() -> Commands:
 	return [ '-vn' ]
 
 

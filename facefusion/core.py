@@ -2,22 +2,37 @@ import inspect
 import itertools
 import shutil
 import signal
+import subprocess
 import sys
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from time import time
+from typing import Callable, Deque, Iterator, List, Optional, Tuple
 
-from facefusion import benchmarker, cli_helper, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, hash_helper, logger, state_manager, translator, voice_extractor
+import cv2
+import numpy
+from tqdm import tqdm
+
+from facefusion import benchmarker, cli_helper, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, gpu_video_pipeline, hash_helper, logger, process_manager, state_manager, video_manager, voice_extractor, wording
 from facefusion.args import apply_args, collect_job_args, reduce_job_args, reduce_step_args
+from facefusion.audio import create_empty_audio_frame, get_audio_frame, get_voice_frame
+from facefusion.common_helper import get_first
+from facefusion.content_analyser import analyse_image, analyse_video
 from facefusion.download import conditional_download_hashes, conditional_download_sources
 from facefusion.exit_helper import hard_exit, signal_exit
-from facefusion.filesystem import get_file_extension, get_file_name, is_image, is_video, resolve_file_paths, resolve_file_pattern
+from facefusion.ffmpeg import copy_image, extract_frames, finalize_image, merge_video, open_rawvideo_writer, replace_audio, restore_audio
+from facefusion.filesystem import filter_audio_paths, get_file_name, is_image, is_video, resolve_file_paths, resolve_file_pattern
 from facefusion.jobs import job_helper, job_manager, job_runner
 from facefusion.jobs.job_list import compose_job_list
 from facefusion.memory import limit_system_memory
 from facefusion.processors.core import get_processors_modules
 from facefusion.program import create_program
 from facefusion.program_helper import validate_args
+from facefusion.temp_helper import clear_temp_directory, create_temp_directory, get_temp_file_path, move_temp_file, resolve_temp_frame_paths
+from facefusion.time_helper import calculate_end_time
 from facefusion.types import Args, ErrorCode
-from facefusion.workflows import image_to_image, image_to_video
+from facefusion.vision import detect_image_resolution, detect_video_resolution, pack_resolution, predict_video_frame_total, read_static_image, read_static_images, read_static_video_frame, restrict_image_resolution, restrict_trim_frame, restrict_video_fps, restrict_video_resolution, scale_resolution, write_image
 
 
 def cli() -> None:
@@ -75,14 +90,14 @@ def route(args : Args) -> None:
 	if state_manager.get_item('command') == 'headless-run':
 		if not job_manager.init_jobs(state_manager.get_item('jobs_path')):
 			hard_exit(1)
-		error_code = process_headless(args)
-		hard_exit(error_code)
+		error_core = process_headless(args)
+		hard_exit(error_core)
 
 	if state_manager.get_item('command') == 'batch-run':
 		if not job_manager.init_jobs(state_manager.get_item('jobs_path')):
 			hard_exit(1)
-		error_code = process_batch(args)
-		hard_exit(error_code)
+		error_core = process_batch(args)
+		hard_exit(error_core)
 
 	if state_manager.get_item('command') in [ 'job-run', 'job-run-all', 'job-retry', 'job-retry-all' ]:
 		if not job_manager.init_jobs(state_manager.get_item('jobs_path')):
@@ -93,15 +108,15 @@ def route(args : Args) -> None:
 
 def pre_check() -> bool:
 	if sys.version_info < (3, 10):
-		logger.error(translator.get('python_not_supported').format(version = '3.10'), __name__)
+		logger.error(wording.get('python_not_supported').format(version = '3.10'), __name__)
 		return False
 
 	if not shutil.which('curl'):
-		logger.error(translator.get('curl_not_installed'), __name__)
+		logger.error(wording.get('curl_not_installed'), __name__)
 		return False
 
 	if not shutil.which('ffmpeg'):
-		logger.error(translator.get('ffmpeg_not_installed'), __name__)
+		logger.error(wording.get('ffmpeg_not_installed'), __name__)
 		return False
 	return True
 
@@ -121,7 +136,7 @@ def common_pre_check() -> bool:
 	content_analyser_content = inspect.getsource(content_analyser).encode()
 	content_analyser_hash = hash_helper.create_hash(content_analyser_content)
 
-	return all(module.pre_check() for module in common_modules) and content_analyser_hash == 'b14e7b92'
+	return all(module.pre_check() for module in common_modules) and content_analyser_hash == '803b5ec7'
 
 
 def processors_pre_check() -> bool:
@@ -169,106 +184,106 @@ def route_job_manager(args : Args) -> ErrorCode:
 
 	if state_manager.get_item('command') == 'job-create':
 		if job_manager.create_job(state_manager.get_item('job_id')):
-			logger.info(translator.get('job_created').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('job_created').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.error(translator.get('job_not_created').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.error(wording.get('job_not_created').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-submit':
 		if job_manager.submit_job(state_manager.get_item('job_id')):
-			logger.info(translator.get('job_submitted').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('job_submitted').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.error(translator.get('job_not_submitted').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.error(wording.get('job_not_submitted').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-submit-all':
 		if job_manager.submit_jobs(state_manager.get_item('halt_on_error')):
-			logger.info(translator.get('job_all_submitted'), __name__)
+			logger.info(wording.get('job_all_submitted'), __name__)
 			return 0
-		logger.error(translator.get('job_all_not_submitted'), __name__)
+		logger.error(wording.get('job_all_not_submitted'), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-delete':
 		if job_manager.delete_job(state_manager.get_item('job_id')):
-			logger.info(translator.get('job_deleted').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('job_deleted').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.error(translator.get('job_not_deleted').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.error(wording.get('job_not_deleted').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-delete-all':
 		if job_manager.delete_jobs(state_manager.get_item('halt_on_error')):
-			logger.info(translator.get('job_all_deleted'), __name__)
+			logger.info(wording.get('job_all_deleted'), __name__)
 			return 0
-		logger.error(translator.get('job_all_not_deleted'), __name__)
+		logger.error(wording.get('job_all_not_deleted'), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-add-step':
 		step_args = reduce_step_args(args)
 
 		if job_manager.add_step(state_manager.get_item('job_id'), step_args):
-			logger.info(translator.get('job_step_added').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('job_step_added').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.error(translator.get('job_step_not_added').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.error(wording.get('job_step_not_added').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-remix-step':
 		step_args = reduce_step_args(args)
 
 		if job_manager.remix_step(state_manager.get_item('job_id'), state_manager.get_item('step_index'), step_args):
-			logger.info(translator.get('job_remix_step_added').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+			logger.info(wording.get('job_remix_step_added').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 			return 0
-		logger.error(translator.get('job_remix_step_not_added').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+		logger.error(wording.get('job_remix_step_not_added').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-insert-step':
 		step_args = reduce_step_args(args)
 
 		if job_manager.insert_step(state_manager.get_item('job_id'), state_manager.get_item('step_index'), step_args):
-			logger.info(translator.get('job_step_inserted').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+			logger.info(wording.get('job_step_inserted').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 			return 0
-		logger.error(translator.get('job_step_not_inserted').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+		logger.error(wording.get('job_step_not_inserted').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-remove-step':
 		if job_manager.remove_step(state_manager.get_item('job_id'), state_manager.get_item('step_index')):
-			logger.info(translator.get('job_step_removed').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+			logger.info(wording.get('job_step_removed').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 			return 0
-		logger.error(translator.get('job_step_not_removed').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
+		logger.error(wording.get('job_step_not_removed').format(job_id = state_manager.get_item('job_id'), step_index = state_manager.get_item('step_index')), __name__)
 		return 1
 	return 1
 
 
 def route_job_runner() -> ErrorCode:
 	if state_manager.get_item('command') == 'job-run':
-		logger.info(translator.get('running_job').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.info(wording.get('running_job').format(job_id = state_manager.get_item('job_id')), __name__)
 		if job_runner.run_job(state_manager.get_item('job_id'), process_step):
-			logger.info(translator.get('processing_job_succeeded').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('processing_job_succeeded').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.info(translator.get('processing_job_failed').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.info(wording.get('processing_job_failed').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-run-all':
-		logger.info(translator.get('running_jobs'), __name__)
+		logger.info(wording.get('running_jobs'), __name__)
 		if job_runner.run_jobs(process_step, state_manager.get_item('halt_on_error')):
-			logger.info(translator.get('processing_jobs_succeeded'), __name__)
+			logger.info(wording.get('processing_jobs_succeeded'), __name__)
 			return 0
-		logger.info(translator.get('processing_jobs_failed'), __name__)
+		logger.info(wording.get('processing_jobs_failed'), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-retry':
-		logger.info(translator.get('retrying_job').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.info(wording.get('retrying_job').format(job_id = state_manager.get_item('job_id')), __name__)
 		if job_runner.retry_job(state_manager.get_item('job_id'), process_step):
-			logger.info(translator.get('processing_job_succeeded').format(job_id = state_manager.get_item('job_id')), __name__)
+			logger.info(wording.get('processing_job_succeeded').format(job_id = state_manager.get_item('job_id')), __name__)
 			return 0
-		logger.info(translator.get('processing_job_failed').format(job_id = state_manager.get_item('job_id')), __name__)
+		logger.info(wording.get('processing_job_failed').format(job_id = state_manager.get_item('job_id')), __name__)
 		return 1
 
 	if state_manager.get_item('command') == 'job-retry-all':
-		logger.info(translator.get('retrying_jobs'), __name__)
+		logger.info(wording.get('retrying_jobs'), __name__)
 		if job_runner.retry_jobs(process_step, state_manager.get_item('halt_on_error')):
-			logger.info(translator.get('processing_jobs_succeeded'), __name__)
+			logger.info(wording.get('processing_jobs_succeeded'), __name__)
 			return 0
-		logger.info(translator.get('processing_jobs_failed'), __name__)
+		logger.info(wording.get('processing_jobs_failed'), __name__)
 		return 1
 	return 2
 
@@ -294,12 +309,7 @@ def process_batch(args : Args) -> ErrorCode:
 			for index, (source_path, target_path) in enumerate(itertools.product(source_paths, target_paths)):
 				step_args['source_paths'] = [ source_path ]
 				step_args['target_path'] = target_path
-
-				try:
-					step_args['output_path'] = job_args.get('output_pattern').format(index = index, source_name = get_file_name(source_path), target_name = get_file_name(target_path), target_extension = get_file_extension(target_path))
-				except KeyError:
-					return 1
-
+				step_args['output_path'] = job_args.get('output_pattern').format(index = index)
 				if not job_manager.add_step(job_id, step_args):
 					return 1
 			if job_manager.submit_job(job_id) and job_runner.run_job(job_id, process_step):
@@ -308,12 +318,7 @@ def process_batch(args : Args) -> ErrorCode:
 		if not source_paths and target_paths:
 			for index, target_path in enumerate(target_paths):
 				step_args['target_path'] = target_path
-
-				try:
-					step_args['output_path'] = job_args.get('output_pattern').format(index = index, target_name = get_file_name(target_path), target_extension = get_file_extension(target_path))
-				except KeyError:
-					return 1
-
+				step_args['output_path'] = job_args.get('output_pattern').format(index = index)
 				if not job_manager.add_step(job_id, step_args):
 					return 1
 			if job_manager.submit_job(job_id) and job_runner.run_job(job_id, process_step):
@@ -326,7 +331,7 @@ def process_step(job_id : str, step_index : int, step_args : Args) -> bool:
 	step_args.update(collect_job_args())
 	apply_args(step_args, state_manager.set_item)
 
-	logger.info(translator.get('processing_step').format(step_current = step_index + 1, step_total = step_total), __name__)
+	logger.info(wording.get('processing_step').format(step_current = step_index + 1, step_total = step_total), __name__)
 	if common_pre_check() and processors_pre_check():
 		error_code = conditional_process()
 		return error_code == 0
@@ -341,10 +346,539 @@ def conditional_process() -> ErrorCode:
 			return 2
 
 	if is_image(state_manager.get_item('target_path')):
-		return image_to_image.process(start_time)
+		return process_image(start_time)
 	if is_video(state_manager.get_item('target_path')):
-		return image_to_video.process(start_time)
+		return process_video(start_time)
 
 	return 0
 
 
+def process_image(start_time : float) -> ErrorCode:
+	if analyse_image(state_manager.get_item('target_path')):
+		return 3
+
+	logger.debug(wording.get('clearing_temp'), __name__)
+	clear_temp_directory(state_manager.get_item('target_path'))
+	logger.debug(wording.get('creating_temp'), __name__)
+	create_temp_directory(state_manager.get_item('target_path'))
+
+	process_manager.start()
+
+	output_image_resolution = scale_resolution(detect_image_resolution(state_manager.get_item('target_path')), state_manager.get_item('output_image_scale'))
+	temp_image_resolution = restrict_image_resolution(state_manager.get_item('target_path'), output_image_resolution)
+	logger.info(wording.get('copying_image').format(resolution = pack_resolution(temp_image_resolution)), __name__)
+	if copy_image(state_manager.get_item('target_path'), temp_image_resolution):
+		logger.debug(wording.get('copying_image_succeeded'), __name__)
+	else:
+		logger.error(wording.get('copying_image_failed'), __name__)
+		process_manager.end()
+		return 1
+
+	temp_image_path = get_temp_file_path(state_manager.get_item('target_path'))
+	reference_vision_frame = read_static_image(temp_image_path)
+	source_vision_frames = read_static_images(state_manager.get_item('source_paths'))
+	source_audio_frame = create_empty_audio_frame()
+	source_voice_frame = create_empty_audio_frame()
+	target_vision_frame = read_static_image(temp_image_path)
+	temp_vision_frame = target_vision_frame.copy()
+
+	for processor_module in get_processors_modules(state_manager.get_item('processors')):
+		logger.info(wording.get('processing'), processor_module.__name__)
+		temp_vision_frame = processor_module.process_frame(
+		{
+			'reference_vision_frame': reference_vision_frame,
+			'source_vision_frames': source_vision_frames,
+			'source_audio_frame': source_audio_frame,
+			'source_voice_frame': source_voice_frame,
+			'target_vision_frame': target_vision_frame,
+			'temp_vision_frame': temp_vision_frame
+		})
+		processor_module.post_process()
+
+	write_image(temp_image_path, temp_vision_frame)
+	if is_process_stopping():
+		return 4
+
+	logger.info(wording.get('finalizing_image').format(resolution = pack_resolution(output_image_resolution)), __name__)
+	if finalize_image(state_manager.get_item('target_path'), state_manager.get_item('output_path'), output_image_resolution):
+		logger.debug(wording.get('finalizing_image_succeeded'), __name__)
+	else:
+		logger.warn(wording.get('finalizing_image_skipped'), __name__)
+
+	logger.debug(wording.get('clearing_temp'), __name__)
+	clear_temp_directory(state_manager.get_item('target_path'))
+
+	if is_image(state_manager.get_item('output_path')):
+		logger.info(wording.get('processing_image_succeeded').format(seconds = calculate_end_time(start_time)), __name__)
+	else:
+		logger.error(wording.get('processing_image_failed'), __name__)
+		process_manager.end()
+		return 1
+	process_manager.end()
+	return 0
+
+
+def process_video(start_time : float) -> ErrorCode:
+	trim_frame_start, trim_frame_end = restrict_trim_frame(state_manager.get_item('target_path'), state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
+	if analyse_video(state_manager.get_item('target_path'), trim_frame_start, trim_frame_end):
+		return 3
+
+	logger.debug(wording.get('clearing_temp'), __name__)
+	clear_temp_directory(state_manager.get_item('target_path'))
+	logger.debug(wording.get('creating_temp'), __name__)
+	create_temp_directory(state_manager.get_item('target_path'))
+
+	process_manager.start()
+	output_video_resolution = scale_resolution(detect_video_resolution(state_manager.get_item('target_path')), state_manager.get_item('output_video_scale'))
+	temp_video_resolution = restrict_video_resolution(state_manager.get_item('target_path'), output_video_resolution)
+	temp_video_fps = restrict_video_fps(state_manager.get_item('target_path'), state_manager.get_item('output_video_fps'))
+	streaming_used = False
+	if _can_use_streaming_pipeline():
+		logger.info('Streaming frames directly through CUDA pipeline', __name__)
+		streaming_used = process_video_streaming(temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end)
+		if streaming_used:
+			logger.debug('Streaming pipeline completed successfully', __name__)
+		else:
+			logger.info('Streaming pipeline unavailable or failed; falling back to legacy extraction', __name__)
+
+	if not streaming_used:
+		logger.info(wording.get('extracting_frames').format(resolution = pack_resolution(temp_video_resolution), fps = temp_video_fps), __name__)
+
+		if extract_frames(state_manager.get_item('target_path'), temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end):
+			logger.debug(wording.get('extracting_frames_succeeded'), __name__)
+		else:
+			if is_process_stopping():
+				return 4
+			logger.error(wording.get('extracting_frames_failed'), __name__)
+			process_manager.end()
+			return 1
+
+		temp_frame_paths = resolve_temp_frame_paths(state_manager.get_item('target_path'))
+
+		if temp_frame_paths:
+			with tqdm(total = len(temp_frame_paths), desc = wording.get('processing'), unit = 'frame', ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
+				progress.set_postfix(execution_providers = state_manager.get_item('execution_providers'))
+
+				with ThreadPoolExecutor(max_workers = state_manager.get_item('execution_thread_count')) as executor:
+					futures = []
+
+					for frame_number, temp_frame_path in enumerate(temp_frame_paths):
+						future = executor.submit(process_temp_frame, temp_frame_path, frame_number)
+						futures.append(future)
+
+					for future in as_completed(futures):
+						if is_process_stopping():
+							for __future__ in futures:
+								__future__.cancel()
+
+						if not future.cancelled():
+							future.result()
+							progress.update()
+
+			if is_process_stopping():
+				return 4
+		else:
+			logger.error(wording.get('temp_frames_not_found'), __name__)
+			process_manager.end()
+			return 1
+
+		logger.info(wording.get('merging_video').format(resolution = pack_resolution(output_video_resolution), fps = state_manager.get_item('output_video_fps')), __name__)
+		if merge_video(state_manager.get_item('target_path'), temp_video_fps, output_video_resolution, state_manager.get_item('output_video_fps'), trim_frame_start, trim_frame_end):
+			logger.debug(wording.get('merging_video_succeeded'), __name__)
+		else:
+			if is_process_stopping():
+				return 4
+			logger.error(wording.get('merging_video_failed'), __name__)
+			process_manager.end()
+			return 1
+
+	for processor_module in get_processors_modules(state_manager.get_item('processors')):
+		processor_module.post_process()
+
+	if is_process_stopping():
+		return 4
+
+	if state_manager.get_item('output_audio_volume') == 0:
+		logger.info(wording.get('skipping_audio'), __name__)
+		move_temp_file(state_manager.get_item('target_path'), state_manager.get_item('output_path'))
+	else:
+		source_audio_path = get_first(filter_audio_paths(state_manager.get_item('source_paths')))
+		if source_audio_path:
+			if replace_audio(state_manager.get_item('target_path'), source_audio_path, state_manager.get_item('output_path')):
+				video_manager.clear_video_pool()
+				logger.debug(wording.get('replacing_audio_succeeded'), __name__)
+			else:
+				video_manager.clear_video_pool()
+				if is_process_stopping():
+					return 4
+				logger.warn(wording.get('replacing_audio_skipped'), __name__)
+				move_temp_file(state_manager.get_item('target_path'), state_manager.get_item('output_path'))
+		else:
+			if restore_audio(state_manager.get_item('target_path'), state_manager.get_item('output_path'), trim_frame_start, trim_frame_end):
+				video_manager.clear_video_pool()
+				logger.debug(wording.get('restoring_audio_succeeded'), __name__)
+			else:
+				video_manager.clear_video_pool()
+				if is_process_stopping():
+					return 4
+				logger.warn(wording.get('restoring_audio_skipped'), __name__)
+				move_temp_file(state_manager.get_item('target_path'), state_manager.get_item('output_path'))
+
+	logger.debug(wording.get('clearing_temp'), __name__)
+	clear_temp_directory(state_manager.get_item('target_path'))
+
+	if is_video(state_manager.get_item('output_path')):
+		logger.info(wording.get('processing_video_succeeded').format(seconds = calculate_end_time(start_time)), __name__)
+	else:
+		logger.error(wording.get('processing_video_failed'), __name__)
+		process_manager.end()
+		return 1
+	process_manager.end()
+	return 0
+
+
+@lru_cache(maxsize = None)
+def _cached_reference_frame(target_path : str, reference_frame_number : int) -> numpy.ndarray:
+	return read_static_video_frame(target_path, reference_frame_number)
+
+
+@lru_cache(maxsize = None)
+def _cached_source_frames(source_paths : Tuple[str, ...]) -> List[numpy.ndarray]:
+	return read_static_images(list(source_paths))
+
+
+def _resolve_audio_frames(source_audio_path : Optional[str], temp_video_fps : float, frame_number : int) -> Tuple[numpy.ndarray, numpy.ndarray]:
+	if source_audio_path:
+		source_audio_frame = get_audio_frame(source_audio_path, temp_video_fps, frame_number)
+		source_voice_frame = get_voice_frame(source_audio_path, temp_video_fps, frame_number)
+	else:
+		source_audio_frame = create_empty_audio_frame()
+		source_voice_frame = create_empty_audio_frame()
+
+	if not numpy.any(source_audio_frame):
+		source_audio_frame = create_empty_audio_frame()
+	if not numpy.any(source_voice_frame):
+		source_voice_frame = create_empty_audio_frame()
+	return source_audio_frame, source_voice_frame
+
+
+def process_frame_runtime(target_vision_frame : numpy.ndarray, frame_number : int, reference_vision_frame : numpy.ndarray, source_vision_frames : List[numpy.ndarray], source_audio_path : Optional[str], temp_video_fps : float) -> numpy.ndarray:
+	temp_vision_frame = target_vision_frame.copy()
+	source_audio_frame, source_voice_frame = _resolve_audio_frames(source_audio_path, temp_video_fps, frame_number)
+
+	for processor_module in get_processors_modules(state_manager.get_item('processors')):
+		temp_vision_frame = processor_module.process_frame(
+		{
+			'reference_vision_frame': reference_vision_frame,
+			'source_vision_frames': source_vision_frames,
+			'source_audio_frame': source_audio_frame,
+			'source_voice_frame': source_voice_frame,
+			'target_vision_frame': target_vision_frame,
+			'temp_vision_frame': temp_vision_frame
+		})
+	return temp_vision_frame
+
+
+def process_temp_frame(temp_frame_path : str, frame_number : int) -> bool:
+	target_path = state_manager.get_item('target_path')
+	reference_number = state_manager.get_item('reference_frame_number')
+	reference_vision_frame = _cached_reference_frame(target_path, reference_number)
+	source_paths = tuple(state_manager.get_item('source_paths') or [])
+	source_vision_frames = _cached_source_frames(source_paths)
+	source_audio_path = get_first(filter_audio_paths(state_manager.get_item('source_paths')))
+	temp_video_fps = restrict_video_fps(target_path, state_manager.get_item('output_video_fps'))
+	target_vision_frame = read_static_image(temp_frame_path)
+	processed_frame = process_frame_runtime(target_vision_frame, frame_number, reference_vision_frame, source_vision_frames, source_audio_path, temp_video_fps)
+	return write_image(temp_frame_path, processed_frame)
+
+
+def is_process_stopping() -> bool:
+	if process_manager.is_stopping():
+		process_manager.end()
+		logger.info(wording.get('processing_stopped'), __name__)
+	return process_manager.is_pending()
+
+
+def _can_use_streaming_pipeline() -> bool:
+	if not state_manager.get_item('enable_streaming_pipeline'):
+		return False
+	if gpu_video_pipeline.is_available():
+		return True
+	try:
+		import av  # type: ignore
+		return True
+	except Exception:
+		logger.debug('Streaming pipeline disabled because GPU pipeline and PyAV are unavailable', __name__)
+		return False
+
+
+def _flush_stream_future(inflight : Deque[Tuple[int, Future[numpy.ndarray]]], writer : subprocess.Popen[bytes], progress : tqdm) -> bool:
+	frame_number, future = inflight.popleft()
+	if future.cancelled():
+		return False
+	frame_data = future.result()
+	if frame_data.dtype != numpy.uint8:
+		frame_data = frame_data.clip(0, 255).astype(numpy.uint8)
+	if writer.stdin:
+		writer.stdin.write(frame_data.tobytes())
+	progress.update()
+	return True
+
+
+def _build_stream_generator_pyav(target_path : str, temp_video_resolution : Tuple[int, int], temp_video_fps : float, trim_frame_start : int, trim_frame_end : int) -> Optional[Tuple[Iterator[Tuple[int, numpy.ndarray]], Callable[[], None]]]:
+	try:
+		import av  # type: ignore
+	except Exception:
+		return None
+
+	container = av.open(target_path)
+	video_stream = next((stream for stream in container.streams if stream.type == 'video'), None)
+	if video_stream is None:
+		container.close()
+		return None
+	video_stream.thread_type = 'AUTO'
+
+	width, height = temp_video_resolution
+
+	def iterator() -> Iterator[Tuple[int, numpy.ndarray]]:
+		frame_index = -1
+		for frame in container.decode(video = video_stream.index):
+			frame_index += 1
+			if trim_frame_start and frame_index < trim_frame_start:
+				continue
+			if trim_frame_end and frame_index > trim_frame_end:
+				break
+			frame_ndarray = frame.to_ndarray(format = 'bgr24')
+			if frame_ndarray.shape[0] != height or frame_ndarray.shape[1] != width:
+				frame_ndarray = cv2.resize(frame_ndarray, (width, height), interpolation = cv2.INTER_AREA)
+			yield frame_index, frame_ndarray
+
+	def cleanup() -> None:
+		container.close()
+
+	return iterator(), cleanup
+
+
+def _build_stream_generator_ffmpeg(target_path : str, temp_video_resolution : Tuple[int, int], temp_video_fps : float, trim_frame_start : int, trim_frame_end : int) -> Optional[Tuple[Iterator[Tuple[int, numpy.ndarray]], Callable[[], None]]]:
+	ffmpeg_bin = shutil.which('ffmpeg')
+	if not ffmpeg_bin:
+		return None
+	width, height = temp_video_resolution
+	filters : List[str] = []
+	trim_parts : List[str] = []
+	if isinstance(trim_frame_start, int) and trim_frame_start > 0:
+		trim_parts.append(f'start_frame={trim_frame_start}')
+	if isinstance(trim_frame_end, int) and trim_frame_end > 0:
+		trim_parts.append(f'end_frame={trim_frame_end}')
+	if trim_parts:
+		filters.append('trim=' + ':'.join(trim_parts))
+	filters.append(f'fps={temp_video_fps}')
+	filters.append(f'scale={width}:{height}')
+	filter_str = ','.join(filters)
+	command : List[str] = [
+		ffmpeg_bin,
+		'-loglevel', 'error',
+		'-i', target_path,
+		'-an',
+		'-vsync', '0'
+	]
+	if filter_str:
+		command.extend(['-vf', filter_str])
+	command.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'])
+
+	process = subprocess.Popen(command, stdout = subprocess.PIPE)
+	if process.stdout is None:
+		process.terminate()
+		return None
+	frame_size = width * height * 3
+
+	def iterator() -> Iterator[Tuple[int, numpy.ndarray]]:
+		frame_index = -1
+		while True:
+			if is_process_stopping():
+				break
+			buffer = process.stdout.read(frame_size)
+			if not buffer or len(buffer) < frame_size:
+				break
+			frame_index += 1
+			frame_array = numpy.frombuffer(buffer, dtype = numpy.uint8)
+			frame_ndarray = frame_array.reshape((height, width, 3))
+			yield frame_index, frame_ndarray
+
+	def cleanup() -> None:
+		if process.stdout:
+			try:
+				process.stdout.close()
+			except Exception:
+				pass
+		if process.poll() is None:
+			try:
+				process.terminate()
+			except Exception:
+				pass
+		try:
+			process.wait()
+		except Exception:
+			pass
+
+	return iterator(), cleanup
+
+
+def _run_streaming_loop(
+	frame_iterator : Iterator[Tuple[int, numpy.ndarray]],
+	cleanup : Callable[[], None],
+	writer : subprocess.Popen[bytes],
+	frame_total : int,
+	providers : List[str],
+	pipeline_depth : int,
+	reference_vision_frame : numpy.ndarray,
+	source_vision_frames : List[numpy.ndarray],
+	source_audio_path : Optional[str],
+	temp_video_fps : float
+) -> int:
+	processed = 0
+	inflight : Deque[Tuple[int, Future[numpy.ndarray]]] = deque()
+
+	try:
+		with tqdm(total = frame_total, desc = wording.get('processing'), unit = 'frame', ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
+			progress.set_postfix(execution_providers = providers)
+			with ThreadPoolExecutor(max_workers = pipeline_depth) as executor:
+				for frame_index, frame_ndarray in frame_iterator:
+					if is_process_stopping():
+						break
+					future = executor.submit(process_frame_runtime, frame_ndarray, frame_index, reference_vision_frame, source_vision_frames, source_audio_path, temp_video_fps)
+					inflight.append((frame_index, future))
+					while len(inflight) >= pipeline_depth:
+						if is_process_stopping():
+							break
+						if not _flush_stream_future(inflight, writer, progress):
+							break
+						processed += 1
+			if not is_process_stopping():
+				while inflight:
+					if not _flush_stream_future(inflight, writer, progress):
+						break
+					processed += 1
+	finally:
+		for _, future in inflight:
+			future.cancel()
+		cleanup()
+
+	return processed
+def process_video_streaming(temp_video_resolution : Tuple[int, int], temp_video_fps : float, trim_frame_start : int, trim_frame_end : int) -> bool:
+	target_path = state_manager.get_item('target_path')
+	temp_video_path = get_temp_file_path(target_path)
+	if gpu_video_pipeline.is_available():
+		try:
+			processed = _process_video_gpu_pipeline(
+				target_path,
+				temp_video_path,
+				temp_video_resolution,
+				temp_video_fps,
+				trim_frame_start,
+				trim_frame_end
+			)
+		except Exception as exception:
+			logger.debug(f'GPU streaming pipeline failed: {exception}', __name__)
+			processed = 0
+		if processed > 0:
+			return True
+
+	writer = open_rawvideo_writer(temp_video_path, temp_video_resolution, temp_video_fps)
+	if writer is None or writer.stdin is None:
+		logger.debug('Failed to initialise ffmpeg rawvideo writer; reverting to temp-frame pipeline', __name__)
+		return False
+
+	reference_number = state_manager.get_item('reference_frame_number')
+	reference_vision_frame = _cached_reference_frame(target_path, reference_number)
+	source_paths = tuple(state_manager.get_item('source_paths') or [])
+	source_vision_frames = _cached_source_frames(source_paths)
+	source_audio_path = get_first(filter_audio_paths(state_manager.get_item('source_paths')))
+	frame_total = predict_video_frame_total(target_path, temp_video_fps, trim_frame_start, trim_frame_end)
+	providers = state_manager.get_item('execution_providers')
+	pipeline_depth = max(2, state_manager.get_item('execution_thread_count') or 1)
+
+	decoder = _build_stream_generator_pyav(target_path, temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end)
+	backend = 'pyav'
+	if decoder is None:
+		decoder = _build_stream_generator_ffmpeg(target_path, temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end)
+		backend = 'ffmpeg'
+	if decoder is None:
+		if writer.stdin:
+			try:
+				writer.stdin.close()
+			except Exception:
+				pass
+		try:
+			writer.wait()
+		except Exception:
+			pass
+		logger.debug('No streaming decoder available; reverting to temp-frame pipeline', __name__)
+		return False
+
+	frame_iterator, cleanup = decoder
+	processed = _run_streaming_loop(frame_iterator, cleanup, writer, frame_total, providers, pipeline_depth, reference_vision_frame, source_vision_frames, source_audio_path, temp_video_fps)
+
+	if writer.stdin:
+		try:
+			writer.stdin.close()
+		except Exception:
+			pass
+	try:
+		writer.wait()
+	except Exception:
+		pass
+
+	if writer.returncode not in (0, None):
+		logger.debug(f'ffmpeg writer exited with code {writer.returncode}', __name__)
+		processed = 0
+
+	if processed <= 0:
+		logger.debug(f'Streaming pipeline ({backend}) did not process any frames', __name__)
+		return False
+	return True
+
+
+def _process_video_gpu_pipeline(
+	target_path: str,
+	temp_video_path: str,
+	temp_video_resolution: Tuple[int, int],
+	temp_video_fps: float,
+	trim_frame_start: int,
+	trim_frame_end: int
+) -> int:
+	if trim_frame_start or trim_frame_end:
+		logger.debug('GPU pipeline trimming not yet supported, falling back', __name__)
+		return 0
+	width, height = temp_video_resolution
+	config = gpu_video_pipeline.PipelineConfig(
+		src=target_path,
+		dst=temp_video_path,
+		fps=temp_video_fps,
+		width=width,
+		height=height,
+		device=int(get_first(state_manager.get_item('execution_device_ids')) or 0),
+		chunk_size=1
+	)
+
+	reference_number = state_manager.get_item('reference_frame_number')
+	reference_vision_frame = _cached_reference_frame(target_path, reference_number)
+	source_paths = tuple(state_manager.get_item('source_paths') or [])
+	source_vision_frames = _cached_source_frames(source_paths)
+	source_audio_path = get_first(filter_audio_paths(state_manager.get_item('source_paths')))
+	providers = state_manager.get_item('execution_providers') or []
+
+	def process_frame_callback(frame_index: int, frame_bgr_cpu: numpy.ndarray) -> numpy.ndarray:
+		processed_cpu = process_frame_runtime(
+			frame_bgr_cpu,
+			trim_frame_start + frame_index,
+			reference_vision_frame,
+			source_vision_frames,
+			source_audio_path,
+			temp_video_fps
+		)
+		return numpy.ascontiguousarray(processed_cpu)
+
+	logger.debug(f'Launching GPU streaming pipeline on providers: {providers}', __name__)
+	processed = gpu_video_pipeline.run_pipeline(config, process_frame_callback)
+	return processed

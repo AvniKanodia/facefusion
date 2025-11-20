@@ -93,7 +93,7 @@ def get_average_face(faces : List[Face]) -> Optional[Face]:
 	return None
 
 
-def get_many_faces(vision_frames : List[VisionFrame]) -> List[Face]:
+def get_many_faces(vision_frames : List[VisionFrame], use_tracking : bool = True) -> List[Face]:
 	many_faces : List[Face] = []
 
 	for vision_frame in vision_frames:
@@ -128,7 +128,13 @@ def scale_face(target_face : Face, target_vision_frame : VisionFrame, temp_visio
 	scale_x = temp_vision_frame.shape[1] / target_vision_frame.shape[1]
 	scale_y = temp_vision_frame.shape[0] / target_vision_frame.shape[0]
 
-	bounding_box = target_face.bounding_box * [ scale_x, scale_y, scale_x, scale_y ]
+	bounding_box =\
+	[
+		target_face.bounding_box * scale_x,
+		target_face.bounding_box * scale_y,
+		target_face.bounding_box * scale_x,
+		target_face.bounding_box * scale_y
+	]
 	landmark_set =\
 	{
 		'5': target_face.landmark_set.get('5') * numpy.array([ scale_x, scale_y ]),

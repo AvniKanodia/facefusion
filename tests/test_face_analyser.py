@@ -18,7 +18,7 @@ def before_all() -> None:
 	subprocess.run([ 'ffmpeg', '-i', get_test_example_file('source.jpg'), '-vf', 'crop=iw*0.8:ih*0.8', get_test_example_file('source-80crop.jpg') ])
 	subprocess.run([ 'ffmpeg', '-i', get_test_example_file('source.jpg'), '-vf', 'crop=iw*0.7:ih*0.7', get_test_example_file('source-70crop.jpg') ])
 	subprocess.run([ 'ffmpeg', '-i', get_test_example_file('source.jpg'), '-vf', 'crop=iw*0.6:ih*0.6', get_test_example_file('source-60crop.jpg') ])
-	state_manager.init_item('execution_device_ids', [ 0 ])
+	state_manager.init_item('execution_device_ids', [ '0' ])
 	state_manager.init_item('execution_providers', [ 'cpu' ])
 	state_manager.init_item('download_providers', [ 'github' ])
 	state_manager.init_item('face_detector_angles', [ 0 ])
@@ -42,7 +42,6 @@ def before_each() -> None:
 def test_get_one_face_with_retinaface() -> None:
 	state_manager.init_item('face_detector_model', 'retinaface')
 	state_manager.init_item('face_detector_size', '320x320')
-	state_manager.init_item('face_detector_margin', (0, 0, 0, 0))
 	face_detector.pre_check()
 
 	source_paths =\
@@ -55,7 +54,7 @@ def test_get_one_face_with_retinaface() -> None:
 
 	for source_path in source_paths:
 		source_frame = read_static_image(source_path)
-		many_faces = get_many_faces([ source_frame ])
+		many_faces = get_many_faces([ source_frame ], use_tracking = False)
 
 		assert len(many_faces) == 1
 
@@ -63,7 +62,6 @@ def test_get_one_face_with_retinaface() -> None:
 def test_get_one_face_with_scrfd() -> None:
 	state_manager.init_item('face_detector_model', 'scrfd')
 	state_manager.init_item('face_detector_size', '640x640')
-	state_manager.init_item('face_detector_margin', (0, 0, 0, 0))
 	face_detector.pre_check()
 
 	source_paths =\
@@ -76,7 +74,7 @@ def test_get_one_face_with_scrfd() -> None:
 
 	for source_path in source_paths:
 		source_frame = read_static_image(source_path)
-		many_faces = get_many_faces([ source_frame ])
+		many_faces = get_many_faces([ source_frame ], use_tracking = False)
 
 		assert len(many_faces) == 1
 
@@ -84,7 +82,6 @@ def test_get_one_face_with_scrfd() -> None:
 def test_get_one_face_with_yoloface() -> None:
 	state_manager.init_item('face_detector_model', 'yoloface')
 	state_manager.init_item('face_detector_size', '640x640')
-	state_manager.init_item('face_detector_margin', (0, 0, 0, 0))
 	face_detector.pre_check()
 
 	source_paths =\
@@ -97,7 +94,7 @@ def test_get_one_face_with_yoloface() -> None:
 
 	for source_path in source_paths:
 		source_frame = read_static_image(source_path)
-		many_faces = get_many_faces([ source_frame ])
+		many_faces = get_many_faces([ source_frame ], use_tracking = False)
 
 		assert len(many_faces) == 1
 
@@ -105,7 +102,6 @@ def test_get_one_face_with_yoloface() -> None:
 def test_get_one_face_with_yunet() -> None:
 	state_manager.init_item('face_detector_model', 'yunet')
 	state_manager.init_item('face_detector_size', '640x640')
-	state_manager.init_item('face_detector_margin', (0, 0, 0, 0))
 	face_detector.pre_check()
 
 	source_paths =\
@@ -118,7 +114,7 @@ def test_get_one_face_with_yunet() -> None:
 
 	for source_path in source_paths:
 		source_frame = read_static_image(source_path)
-		many_faces = get_many_faces([ source_frame ])
+		many_faces = get_many_faces([ source_frame ], use_tracking = False)
 
 		assert len(many_faces) == 1
 
@@ -126,6 +122,6 @@ def test_get_one_face_with_yunet() -> None:
 def test_get_many_faces() -> None:
 	source_path = get_test_example_file('source.jpg')
 	source_frame = read_static_image(source_path)
-	many_faces = get_many_faces([ source_frame, source_frame, source_frame ])
+	many_faces = get_many_faces([ source_frame, source_frame, source_frame ], use_tracking = False)
 
 	assert len(many_faces) == 3

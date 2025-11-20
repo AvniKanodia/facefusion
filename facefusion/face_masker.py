@@ -18,12 +18,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 	{
 		'xseg_1':
 		{
-			'__metadata__':
-			{
-				'vendor': 'DeepFaceLab',
-				'license': 'GPL-3.0',
-				'year': 2021
-			},
 			'hashes':
 			{
 				'face_occluder':
@@ -44,12 +38,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'xseg_2':
 		{
-			'__metadata__':
-			{
-				'vendor': 'DeepFaceLab',
-				'license': 'GPL-3.0',
-				'year': 2021
-			},
 			'hashes':
 			{
 				'face_occluder':
@@ -70,12 +58,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'xseg_3':
 		{
-			'__metadata__':
-			{
-				'vendor': 'DeepFaceLab',
-				'license': 'GPL-3.0',
-				'year': 2021
-			},
 			'hashes':
 			{
 				'face_occluder':
@@ -96,12 +78,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'bisenet_resnet_18':
 		{
-			'__metadata__':
-			{
-				'vendor': 'yakhyo',
-				'license': 'MIT',
-				'year': 2024
-			},
 			'hashes':
 			{
 				'face_parser':
@@ -122,12 +98,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'bisenet_resnet_34':
 		{
-			'__metadata__':
-			{
-				'vendor': 'yakhyo',
-				'license': 'MIT',
-				'year': 2024
-			},
 			'hashes':
 			{
 				'face_parser':

@@ -1,9 +1,9 @@
-from typing import Iterator, List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple
 
 import cv2
 import gradio
 
-from facefusion import state_manager, translator
+from facefusion import state_manager, wording
 from facefusion.camera_manager import clear_camera_pool, get_local_camera_capture
 from facefusion.filesystem import has_image
 from facefusion.streamer import multi_process_capture, open_stream
@@ -26,22 +26,22 @@ def render() -> None:
 
 	has_source_image = has_image(state_manager.get_item('source_paths'))
 	SOURCE_FILE = gradio.File(
-		label = translator.get('uis.source_file'),
+		label = wording.get('uis.source_file'),
 		file_count = 'multiple',
 		value = state_manager.get_item('source_paths') if has_source_image else None
 	)
 	WEBCAM_IMAGE = gradio.Image(
-		label = translator.get('uis.webcam_image'),
+		label = wording.get('uis.webcam_image'),
 		format = 'jpeg',
 		visible = False
 	)
 	WEBCAM_START_BUTTON = gradio.Button(
-		value = translator.get('uis.start_button'),
+		value = wording.get('uis.start_button'),
 		variant = 'primary',
 		size = 'sm'
 	)
 	WEBCAM_STOP_BUTTON = gradio.Button(
-		value = translator.get('uis.stop_button'),
+		value = wording.get('uis.stop_button'),
 		size = 'sm',
 		visible = False
 	)
@@ -82,7 +82,7 @@ def pre_stop() -> Tuple[gradio.File, gradio.Image, gradio.Button, gradio.Button]
 	return gradio.File(visible = True), gradio.Image(visible = False), gradio.Button(visible = True), gradio.Button(visible = False)
 
 
-def start(webcam_device_id : int, webcam_mode : WebcamMode, webcam_resolution : str, webcam_fps : Fps) -> Iterator[VisionFrame]:
+def start(webcam_device_id : int, webcam_mode : WebcamMode, webcam_resolution : str, webcam_fps : Fps) -> Generator[VisionFrame, None, None]:
 	state_manager.init_item('face_selector_mode', 'one')
 	state_manager.sync_state()
 

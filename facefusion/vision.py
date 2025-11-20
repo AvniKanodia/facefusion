@@ -9,35 +9,30 @@ from cv2.typing import Size
 from facefusion.common_helper import is_windows
 from facefusion.filesystem import get_file_extension, is_image, is_video
 from facefusion.thread_helper import thread_semaphore
-from facefusion.types import ColorMode, Duration, Fps, Mask, Orientation, Resolution, Scale, VisionFrame
+from facefusion.types import Duration, Fps, Orientation, Resolution, Scale, VisionFrame
 from facefusion.video_manager import get_video_capture
 
 
-def read_static_images(image_paths : List[str], color_mode : ColorMode = 'rgb') -> List[VisionFrame]:
+def read_static_images(image_paths : List[str]) -> List[VisionFrame]:
 	vision_frames = []
 
 	if image_paths:
 		for image_path in image_paths:
-			vision_frames.append(read_static_image(image_path, color_mode))
+			vision_frames.append(read_static_image(image_path))
 	return vision_frames
 
 
-@lru_cache(maxsize = 64)
-def read_static_image(image_path : str, color_mode : ColorMode = 'rgb') -> Optional[VisionFrame]:
-	return read_image(image_path, color_mode)
+@lru_cache(maxsize = 1024)
+def read_static_image(image_path : str) -> Optional[VisionFrame]:
+	return read_image(image_path)
 
 
-def read_image(image_path : str, color_mode : ColorMode = 'rgb') -> Optional[VisionFrame]:
+def read_image(image_path : str) -> Optional[VisionFrame]:
 	if is_image(image_path):
-		flag = cv2.IMREAD_COLOR
-
-		if color_mode == 'rgba':
-			flag = cv2.IMREAD_UNCHANGED
-
 		if is_windows():
 			image_buffer = numpy.fromfile(image_path, dtype = numpy.uint8)
-			return cv2.imdecode(image_buffer, flag)
-		return cv2.imread(image_path, flag)
+			return cv2.imdecode(image_buffer, cv2.IMREAD_COLOR)
+		return cv2.imread(image_path)
 	return None
 
 
@@ -70,7 +65,7 @@ def restrict_image_resolution(image_path : str, resolution : Resolution) -> Reso
 	return resolution
 
 
-@lru_cache(maxsize = 64)
+@lru_cache(maxsize = 1024)
 def read_static_video_frame(video_path : str, frame_number : int = 0) -> Optional[VisionFrame]:
 	return read_video_frame(video_path, frame_number)
 
@@ -79,7 +74,7 @@ def read_video_frame(video_path : str, frame_number : int = 0) -> Optional[Visio
 	if is_video(video_path):
 		video_capture = get_video_capture(video_path)
 
-		if video_capture and video_capture.isOpened():
+		if video_capture.isOpened():
 			frame_total = video_capture.get(cv2.CAP_PROP_FRAME_COUNT)
 
 			with thread_semaphore():
@@ -96,7 +91,7 @@ def count_video_frame_total(video_path : str) -> int:
 	if is_video(video_path):
 		video_capture = get_video_capture(video_path)
 
-		if video_capture and video_capture.isOpened():
+		if video_capture.isOpened():
 			with thread_semaphore():
 				video_frame_total = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
 				return video_frame_total
@@ -116,7 +111,7 @@ def detect_video_fps(video_path : str) -> Optional[float]:
 	if is_video(video_path):
 		video_capture = get_video_capture(video_path)
 
-		if video_capture and video_capture.isOpened():
+		if video_capture.isOpened():
 			with thread_semaphore():
 				video_fps = video_capture.get(cv2.CAP_PROP_FPS)
 				return video_fps
@@ -169,7 +164,7 @@ def detect_video_resolution(video_path : str) -> Optional[Resolution]:
 	if is_video(video_path):
 		video_capture = get_video_capture(video_path)
 
-		if video_capture and video_capture.isOpened():
+		if video_capture.isOpened():
 			with thread_semaphore():
 				width = video_capture.get(cv2.CAP_PROP_FRAME_WIDTH)
 				height = video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
@@ -347,19 +342,3 @@ def merge_tile_frames(tile_vision_frames : List[VisionFrame], temp_width : int, 
 
 	merge_vision_frame = merge_vision_frame[size[1] : size[1] + temp_height, size[1]: size[1] + temp_width, :]
 	return merge_vision_frame
-
-
-def extract_vision_mask(vision_frame : VisionFrame) -> Mask:
-	if vision_frame.ndim == 3 and vision_frame.shape[2] == 4:
-		return vision_frame[:, :, 3]
-	return numpy.full(vision_frame.shape[:2], 255, dtype = numpy.uint8)
-
-
-def merge_vision_mask(vision_frame : VisionFrame, vision_mask : Mask) -> VisionFrame:
-	return numpy.dstack((vision_frame[:, :, :3], vision_mask))
-
-
-def conditional_merge_vision_mask(vision_frame : VisionFrame, vision_mask : Mask) -> VisionFrame:
-	if numpy.any(vision_mask < 255):
-		return merge_vision_mask(vision_frame, vision_mask)
-	return vision_frame

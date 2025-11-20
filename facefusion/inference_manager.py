@@ -1,14 +1,15 @@
 import importlib
 import random
 from time import sleep, time
-from typing import List
+from typing import List, Optional
 
-from onnxruntime import InferenceSession
+from onnxruntime import InferenceSession, SessionOptions, GraphOptimizationLevel, ExecutionMode
 
-from facefusion import logger, process_manager, state_manager, translator
+import torch
+
+from facefusion import logger, process_manager, state_manager, wording
 from facefusion.app_context import detect_app_context
-from facefusion.common_helper import is_windows
-from facefusion.execution import create_inference_session_providers, has_execution_provider
+from facefusion.execution import create_inference_session_providers
 from facefusion.exit_helper import fatal_exit
 from facefusion.filesystem import get_file_name, is_file
 from facefusion.time_helper import calculate_end_time
@@ -42,7 +43,7 @@ def get_inference_pool(module_name : str, model_names : List[str], model_source_
 	return INFERENCE_POOL_SET.get(app_context).get(current_inference_context)
 
 
-def create_inference_pool(model_source_set : DownloadSet, execution_device_id : int, execution_providers : List[ExecutionProvider]) -> InferencePool:
+def create_inference_pool(model_source_set : DownloadSet, execution_device_id : str, execution_providers : List[ExecutionProvider]) -> InferencePool:
 	inference_pool : InferencePool = {}
 
 	for model_name in model_source_set.keys():
@@ -58,32 +59,77 @@ def clear_inference_pool(module_name : str, model_names : List[str]) -> None:
 	execution_providers = resolve_execution_providers(module_name)
 	app_context = detect_app_context()
 
-	if is_windows() and has_execution_provider('directml'):
-		INFERENCE_POOL_SET[app_context].clear()
-
 	for execution_device_id in execution_device_ids:
 		inference_context = get_inference_context(module_name, model_names, execution_device_id, execution_providers)
+
 		if INFERENCE_POOL_SET.get(app_context).get(inference_context):
 			del INFERENCE_POOL_SET[app_context][inference_context]
 
 
-def create_inference_session(model_path : str, execution_device_id : int, execution_providers : List[ExecutionProvider]) -> InferenceSession:
-	model_file_name = get_file_name(model_path)
-	start_time = time()
+def create_inference_session(model_path : str, execution_device_id : str, execution_providers : List[ExecutionProvider]) -> InferenceSession:
+    model_file_name = get_file_name(model_path)
+    start_time = time()
 
-	try:
-		inference_session_providers = create_inference_session_providers(execution_device_id, execution_providers)
-		inference_session = InferenceSession(model_path, providers = inference_session_providers)
-		logger.debug(translator.get('loading_model_succeeded').format(model_name = model_file_name, seconds = calculate_end_time(start_time)), __name__)
-		return inference_session
+    inference_session: Optional[InferenceSession] = None
+    try:
+        inference_session_providers = create_inference_session_providers(execution_device_id, execution_providers)
+        sess_options = SessionOptions()
+        # Maximize graph optimizations
+        sess_options.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.enable_mem_pattern = True
 
-	except Exception:
-		logger.error(translator.get('loading_model_failed').format(model_name = model_file_name), __name__)
-		fatal_exit(1)
+        lower_providers = [p.lower() for p in execution_providers]
+        uses_gpu = any(p in ('cuda', 'tensorrt') for p in lower_providers)
+
+        thread_count = state_manager.get_item('execution_thread_count')
+        configured_threads = thread_count if isinstance(thread_count, int) and thread_count > 0 else None
+
+        if not uses_gpu:
+            try:
+                sess_options.execution_mode = ExecutionMode.ORT_PARALLEL
+            except Exception:
+                pass
+        else:
+            try:
+                device_index = int(execution_device_id)
+            except Exception:
+                device_index = 0
+            try:
+                with torch.cuda.device(device_index):
+                    user_stream = torch.cuda.current_stream()
+                    stream_ptr = str(user_stream.cuda_stream)  # type: ignore[attr-defined]
+                updated_providers = []
+                for provider, options in inference_session_providers:
+                    if isinstance(options, dict) and provider in ('TensorrtExecutionProvider', 'CUDAExecutionProvider'):
+                        provider_options = dict(options)
+                        provider_options['has_user_compute_stream'] = '1'
+                        provider_options['user_compute_stream'] = stream_ptr
+                        if provider == 'TensorrtExecutionProvider':
+                            provider_options.setdefault('trt_fp16_enable', True)
+                            provider_options.setdefault('trt_timing_cache_enable', True)
+                        updated_providers.append((provider, provider_options))
+                    else:
+                        updated_providers.append((provider, options))
+                inference_session_providers = updated_providers
+            except Exception as stream_exception:
+                logger.debug(f'Falling back to provider-managed stream: {stream_exception}', __name__)
+
+        if configured_threads:
+            sess_options.intra_op_num_threads = configured_threads
+            sess_options.inter_op_num_threads = max(1, configured_threads // 2)
+        inference_session = InferenceSession(model_path, sess_options = sess_options, providers = inference_session_providers)
+    except Exception as exception:
+        logger.error(wording.get('loading_model_failed').format(model_name = model_file_name), __name__)
+        logger.debug(str(exception), __name__)
+        fatal_exit(1)
+
+    assert inference_session is not None
+    logger.debug(wording.get('loading_model_succeeded').format(model_name = model_file_name, seconds = calculate_end_time(start_time)), __name__)
+    return inference_session
 
 
-def get_inference_context(module_name : str, model_names : List[str], execution_device_id : int, execution_providers : List[ExecutionProvider]) -> str:
-	inference_context = '.'.join([ module_name ] + model_names + [ str(execution_device_id) ] + list(execution_providers))
+def get_inference_context(module_name : str, model_names : List[str], execution_device_id : str, execution_providers : List[ExecutionProvider]) -> str:
+	inference_context = '.'.join([ module_name ] + model_names + [ execution_device_id ] + list(execution_providers))
 	return inference_context
 
 

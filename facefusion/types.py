@@ -50,10 +50,6 @@ FaceStore = TypedDict('FaceStore',
 	'static_faces' : FaceSet
 })
 
-Language = Literal['en']
-Locals : TypeAlias = Dict[Language, Dict[str, Any]]
-LocalPoolSet : TypeAlias = Dict[str, Locals]
-
 VideoCaptureSet : TypeAlias = Dict[str, cv2.VideoCapture]
 VideoWriterSet : TypeAlias = Dict[str, cv2.VideoWriter]
 CameraCaptureSet : TypeAlias = Dict[str, cv2.VideoCapture]
@@ -67,7 +63,6 @@ CameraPoolSet = TypedDict('CameraPoolSet',
 	'capture': CameraCaptureSet
 })
 
-ColorMode = Literal['rgb', 'rgba']
 VisionFrame : TypeAlias = NDArray[Any]
 Mask : TypeAlias = NDArray[Any]
 Points : TypeAlias = NDArray[Any]
@@ -88,9 +83,7 @@ VoiceChunk : TypeAlias = NDArray[Any]
 
 Fps : TypeAlias = float
 Duration : TypeAlias = float
-Color : TypeAlias = Tuple[int, int, int, int]
 Padding : TypeAlias = Tuple[int, int, int, int]
-Margin : TypeAlias = Tuple[int, int, int, int]
 Orientation = Literal['landscape', 'portrait']
 Resolution : TypeAlias = Tuple[int, int]
 
@@ -101,8 +94,7 @@ ProcessStep : TypeAlias = Callable[[str, int, Args], bool]
 
 Content : TypeAlias = Dict[str, Any]
 
-Command : TypeAlias = str
-CommandSet : TypeAlias = Dict[str, List[Command]]
+Commands : TypeAlias = List[str]
 
 WarpTemplate = Literal['arcface_112_v1', 'arcface_112_v2', 'arcface_128', 'dfl_whole_face', 'ffhq_512', 'mtcnn_512', 'styleganex_384']
 WarpTemplateSet : TypeAlias = Dict[WarpTemplate, NDArray[Any]]
@@ -112,8 +104,8 @@ ErrorCode = Literal[0, 1, 2, 3, 4]
 LogLevel = Literal['error', 'warn', 'info', 'debug']
 LogLevelSet : TypeAlias = Dict[LogLevel, int]
 
-TableHeader : TypeAlias = str
-TableContent : TypeAlias = Any
+TableHeaders = List[str]
+TableContents = List[List[Any]]
 
 FaceDetectorModel = Literal['many', 'retinaface', 'scrfd', 'yolo_face', 'yunet']
 FaceLandmarkerModel = Literal['many', '2dfan4', 'peppa_wutz']
@@ -132,7 +124,7 @@ VoiceExtractorModel = Literal['kim_vocal_1', 'kim_vocal_2', 'uvr_mdxnet']
 
 AudioFormat = Literal['flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav']
 ImageFormat = Literal['bmp', 'jpeg', 'png', 'tiff', 'webp']
-VideoFormat = Literal['avi', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mxf', 'webm', 'wmv']
+VideoFormat = Literal['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm', 'wmv']
 TempFrameFormat = Literal['bmp', 'jpeg', 'png', 'tiff']
 AudioTypeSet : TypeAlias = Dict[AudioFormat, str]
 ImageTypeSet : TypeAlias = Dict[ImageFormat, str]
@@ -275,7 +267,6 @@ StateKey = Literal\
 	'benchmark_cycle_count',
 	'face_detector_model',
 	'face_detector_size',
-	'face_detector_margin',
 	'face_detector_angles',
 	'face_detector_score',
 	'face_landmarker_model',
@@ -312,6 +303,7 @@ StateKey = Literal\
 	'output_video_scale',
 	'output_video_fps',
 	'processors',
+	'face_swapper_batching',
 	'open_browser',
 	'ui_layouts',
 	'ui_workflow',
@@ -345,7 +337,6 @@ State = TypedDict('State',
 	'benchmark_cycle_count' : int,
 	'face_detector_model' : FaceDetectorModel,
 	'face_detector_size' : str,
-	'face_detector_margin': Margin,
 	'face_detector_angles' : List[Angle],
 	'face_detector_score' : Score,
 	'face_landmarker_model' : FaceLandmarkerModel,
@@ -385,7 +376,7 @@ State = TypedDict('State',
 	'open_browser' : bool,
 	'ui_layouts' : List[str],
 	'ui_workflow' : UiWorkflow,
-	'execution_device_ids' : List[int],
+	'execution_device_ids' : List[str],
 	'execution_providers' : List[ExecutionProvider],
 	'execution_thread_count' : int,
 	'video_memory_strategy' : VideoMemoryStrategy,
@@ -398,4 +389,3 @@ State = TypedDict('State',
 })
 ApplyStateItem : TypeAlias = Callable[[Any, Any], None]
 StateSet : TypeAlias = Dict[AppContext, State]
-

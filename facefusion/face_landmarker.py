@@ -18,12 +18,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 	{
 		'2dfan4':
 		{
-			'__metadata__':
-			{
-				'vendor': 'breadbread1984',
-				'license': 'MIT',
-				'year': 2018
-			},
 			'hashes':
 			{
 				'2dfan4':
@@ -44,12 +38,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'peppa_wutz':
 		{
-			'__metadata__':
-			{
-				'vendor': 'Unknown',
-				'license': 'Apache-2.0',
-				'year': 2023
-			},
 			'hashes':
 			{
 				'peppa_wutz':
@@ -70,12 +58,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 		},
 		'fan_68_5':
 		{
-			'__metadata__':
-			{
-				'vendor': 'FaceFusion',
-				'license': 'OpenRAIL-M',
-				'year': 2024
-			},
 			'hashes':
 			{
 				'fan_68_5':
@@ -213,7 +195,7 @@ def forward_with_2dfan4(crop_vision_frame : VisionFrame) -> Tuple[Prediction, Pr
 			'input': [ crop_vision_frame ]
 		})
 
-	return prediction
+		return prediction
 
 
 def forward_with_peppa_wutz(crop_vision_frame : VisionFrame) -> Prediction:
@@ -225,7 +207,7 @@ def forward_with_peppa_wutz(crop_vision_frame : VisionFrame) -> Prediction:
 			'input': crop_vision_frame
 		})[0]
 
-	return prediction
+		return prediction
 
 
 def forward_fan_68_5(face_landmark_5 : FaceLandmark5) -> FaceLandmark68:
@@ -237,4 +219,4 @@ def forward_fan_68_5(face_landmark_5 : FaceLandmark5) -> FaceLandmark68:
 			'input': [ face_landmark_5 ]
 		})[0][0]
 
-	return face_landmark_68_5
+		return face_landmark_68_5

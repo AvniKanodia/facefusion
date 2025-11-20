@@ -17,12 +17,6 @@ def create_static_model_set(download_scope : DownloadScope) -> ModelSet:
 	{
 		'fairface':
 		{
-			'__metadata__':
-			{
-				'vendor': 'dchen236',
-				'license': 'Non-Commercial',
-				'year': 2021
-			},
 			'hashes':
 			{
 				'face_classifier':

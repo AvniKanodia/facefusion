@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy
@@ -68,14 +68,56 @@ WARP_TEMPLATE_SET : WarpTemplateSet =\
 }
 
 
-def estimate_matrix_by_face_landmark_5(face_landmark_5 : FaceLandmark5, warp_template : WarpTemplate, crop_size : Size) -> Matrix:
+# Lightweight EMA smoothers (cheap; helps reduce jitter with negligible cost)
+_LANDMARK_SMOOTHERS: Dict[str, numpy.ndarray] = {}
+_AFFINE_MATRIX_CACHE: Dict[str, Matrix] = {}
+# Higher alpha = stronger smoothing. Keep modest to avoid lag.
+_LANDMARK_ALPHA = 0.85
+_AFFINE_ALPHA = 0.85
+
+
+def reset_affine_smoothers() -> None:
+	"""Reset cached EMA state."""
+	_LANDMARK_SMOOTHERS.clear()
+	_AFFINE_MATRIX_CACHE.clear()
+
+
+def _smooth_landmarks(track_token: Optional[str], landmarks: FaceLandmark5) -> FaceLandmark5:
+	if track_token is None:
+		return landmarks
+	key = str(track_token)
+	prev = _LANDMARK_SMOOTHERS.get(key)
+	if prev is None:
+		_LANDMARK_SMOOTHERS[key] = landmarks.copy()
+		return landmarks
+	smoothed = _LANDMARK_ALPHA * prev + (1.0 - _LANDMARK_ALPHA) * landmarks
+	_LANDMARK_SMOOTHERS[key] = smoothed
+	return smoothed
+
+
+def _smooth_affine(track_token: Optional[str], affine: Matrix) -> Matrix:
+	if track_token is None:
+		return affine
+	key = str(track_token)
+	prev = _AFFINE_MATRIX_CACHE.get(key)
+	if prev is None:
+		_AFFINE_MATRIX_CACHE[key] = affine.copy()
+		return affine
+	smoothed = _AFFINE_ALPHA * prev + (1.0 - _AFFINE_ALPHA) * affine
+	_AFFINE_MATRIX_CACHE[key] = smoothed
+	return smoothed
+
+
+def estimate_matrix_by_face_landmark_5(face_landmark_5 : FaceLandmark5, warp_template : WarpTemplate, crop_size : Size, track_token : Optional[str] = None) -> Matrix:
+	landmarks = _smooth_landmarks(track_token, face_landmark_5)
 	warp_template_norm = WARP_TEMPLATE_SET.get(warp_template) * crop_size
-	affine_matrix = cv2.estimateAffinePartial2D(face_landmark_5, warp_template_norm, method = cv2.RANSAC, ransacReprojThreshold = 100)[0]
+	affine_matrix = cv2.estimateAffinePartial2D(landmarks, warp_template_norm, method = cv2.RANSAC, ransacReprojThreshold = 100)[0]
+	affine_matrix = _smooth_affine(track_token, affine_matrix)
 	return affine_matrix
 
 
-def warp_face_by_face_landmark_5(temp_vision_frame : VisionFrame, face_landmark_5 : FaceLandmark5, warp_template : WarpTemplate, crop_size : Size) -> Tuple[VisionFrame, Matrix]:
-	affine_matrix = estimate_matrix_by_face_landmark_5(face_landmark_5, warp_template, crop_size)
+def warp_face_by_face_landmark_5(temp_vision_frame : VisionFrame, face_landmark_5 : FaceLandmark5, warp_template : WarpTemplate, crop_size : Size, track_token : Optional[str] = None) -> Tuple[VisionFrame, Matrix]:
+	affine_matrix = estimate_matrix_by_face_landmark_5(face_landmark_5, warp_template, crop_size, track_token)
 	crop_vision_frame = cv2.warpAffine(temp_vision_frame, affine_matrix, crop_size, borderMode = cv2.BORDER_REPLICATE, flags = cv2.INTER_AREA)
 	return crop_vision_frame, affine_matrix
 
@@ -98,17 +140,17 @@ def warp_face_by_translation(temp_vision_frame : VisionFrame, translation : Tran
 	return crop_vision_frame, affine_matrix
 
 
-def paste_back(temp_vision_frame : VisionFrame, crop_vision_frame : VisionFrame, crop_vision_mask : Mask, affine_matrix : Matrix) -> VisionFrame:
+def paste_back(temp_vision_frame : VisionFrame, crop_vision_frame : VisionFrame, crop_mask : Mask, affine_matrix : Matrix, track_token : Optional[object] = None) -> VisionFrame:
 	paste_bounding_box, paste_matrix = calculate_paste_area(temp_vision_frame, crop_vision_frame, affine_matrix)
 	x1, y1, x2, y2 = paste_bounding_box
 	paste_width = x2 - x1
 	paste_height = y2 - y1
-	inverse_vision_mask = cv2.warpAffine(crop_vision_mask, paste_matrix, (paste_width, paste_height)).clip(0, 1)
-	inverse_vision_mask = numpy.expand_dims(inverse_vision_mask, axis = -1)
+	inverse_mask = cv2.warpAffine(crop_mask, paste_matrix, (paste_width, paste_height)).clip(0, 1)
+	inverse_mask = numpy.expand_dims(inverse_mask, axis = -1)
 	inverse_vision_frame = cv2.warpAffine(crop_vision_frame, paste_matrix, (paste_width, paste_height), borderMode = cv2.BORDER_REPLICATE)
 	temp_vision_frame = temp_vision_frame.copy()
 	paste_vision_frame = temp_vision_frame[y1:y2, x1:x2]
-	paste_vision_frame = paste_vision_frame * (1 - inverse_vision_mask) + inverse_vision_frame * inverse_vision_mask
+	paste_vision_frame = paste_vision_frame * (1 - inverse_mask) + inverse_vision_frame * inverse_mask
 	temp_vision_frame[y1:y2, x1:x2] = paste_vision_frame.astype(temp_vision_frame.dtype)
 	return temp_vision_frame
 

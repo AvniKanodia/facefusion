@@ -1,15 +1,15 @@
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from facefusion.jobs import job_manager
 from facefusion.time_helper import describe_time_ago
-from facefusion.types import JobStatus, TableContent, TableHeader
+from facefusion.types import JobStatus, TableContents, TableHeaders
 
 
-def compose_job_list(job_status : JobStatus) -> Tuple[List[TableHeader], List[List[TableContent]]]:
+def compose_job_list(job_status : JobStatus) -> Tuple[TableHeaders, TableContents]:
 	jobs = job_manager.find_jobs(job_status)
-	job_headers : List[TableHeader] = [ 'job id', 'steps', 'date created', 'date updated', 'job status' ]
-	job_contents : List[List[TableContent]] = []
+	job_headers : TableHeaders = [ 'job id', 'steps', 'date created', 'date updated', 'job status' ]
+	job_contents : TableContents = []
 
 	for index, job_id in enumerate(jobs):
 		if job_manager.validate_job(job_id):
