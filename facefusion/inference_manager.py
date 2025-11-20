@@ -100,11 +100,14 @@ def create_inference_session(model_path : str, execution_device_id : str, execut
                     stream_ptr = str(user_stream.cuda_stream)  # type: ignore[attr-defined]
                 updated_providers = []
                 for provider, options in inference_session_providers:
-                    if isinstance(options, dict) and provider in ('TensorrtExecutionProvider', 'CUDAExecutionProvider'):
+                    if isinstance(options, dict):
                         provider_options = dict(options)
-                        provider_options['has_user_compute_stream'] = '1'
-                        provider_options['user_compute_stream'] = stream_ptr
-                        if provider == 'TensorrtExecutionProvider':
+                        if provider == 'CUDAExecutionProvider':
+                            # Stream options only supported by CUDA provider
+                            provider_options['has_user_compute_stream'] = '1'
+                            provider_options['user_compute_stream'] = stream_ptr
+                        elif provider == 'TensorrtExecutionProvider':
+                            # TensorRT-specific optimizations (no stream options needed)
                             provider_options.setdefault('trt_fp16_enable', True)
                             provider_options.setdefault('trt_timing_cache_enable', True)
                         updated_providers.append((provider, provider_options))
