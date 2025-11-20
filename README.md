@@ -55,10 +55,10 @@ Documentation
 Read the [documentation](https://docs.facefusion.io) for a deep dive.
 
 
-Benchmark Improvements
+# Benchmark Improvements
 -----------------------
 
-# CUDA Benchmarks
+### CUDA Benchmarks
 ```
 python facefusion.py benchmark \
     --execution-providers cuda \
@@ -106,7 +106,7 @@ Our CUDA changes deliver:
   - 9% higher FPS (45.4 → 49.54)
 
 
-# TensorRT Benchmarks
+### TensorRT Benchmarks
 ```
 python facefusion.py benchmark \
     --execution-providers tensorrt \
@@ -155,10 +155,10 @@ Our TensorRT changes deliver:
   - 6–7% higher FPS (88.25 → 93.86)
 
 
-Summary of Optimizations 
+# Summary of Optimizations 
 -------------------------
 
-1. GPU Acceleration & Performance
+### GPU Acceleration & Performance
 
   - Custom TensorRT Wrapper (tensorrt_runner.py) - Replaces ONNX Runtime's basic TensorRT support with custom engine compilation featuring CuPy zero-copy GPU binding, dynamic power-of-2 batch optimization (up to 64 faces), and SHA1-versioned engine caching that eliminates warmup on subsequent runs
 
@@ -172,7 +172,7 @@ Summary of Optimizations
 
   - Optimized Inference Sessions - Adds SessionOptions configuration with ORT_ENABLE_ALL graph optimization, memory pattern caching, PyTorch CUDA stream binding via cuda_stream provider option for proper synchronization, and automatic serial (GPU) vs parallel (CPU) execution mode selection to avoid thread contention.
 
-  2. Quality & Temporal Stability
+### Quality & Temporal Stability
 
   - GPU ROI Compositor (gpu/compositor.py) - 3-level Laplacian pyramid blending in perceptually-correct linear RGB space with sRGB↔Linear conversions, separable Gaussian blur, and spatial dithering eliminates seams, color halos, and banding artifacts that base paste_back operations exhibit, maintaining 8-bit quality without visible posterization.
 
